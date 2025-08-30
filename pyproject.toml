@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jap-syu"
+version = "0.1.0"
+description = "Japan Companies Crawler (annual batch)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "playwright",
+  "httpx",
+  "beautifulsoup4",
+  "lxml",
+  "pydantic>=2",
+  "pydantic-settings",
+  "jinja2",
+  "loguru",
+  "tenacity",
+  "python-dotenv",
+  "tqdm"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
