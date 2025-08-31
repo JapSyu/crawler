@@ -97,12 +97,28 @@ class EdinetAPI:
             "employeeCount": ["従業員数", "NumberOfEmployees"]
         }
         
-        # 찾을 태그들
-        tags = {
-            "avgTenureYears": ["jpcrp_cor:AverageLengthOfServiceYearsInformationOfReportingCompanyInformation"],
-            "avgAgeYears": ["jpcrp_cor:AverageAgeYearsInformationOfReportingCompanyInformation"],
-            "avgAnnualSalaryJPY": ["jpcrp_cor:AverageAnnualSalaryInformationOfReportingCompanyInformation"],
-            "employeeCount": ["jpcrp_cor:AverageNumberOfEmployees"]
+        # iXBRL 개념 이름들 (실제 name 속성값)
+        ixbrl_concepts = {
+            "avgTenureYears": [
+                "jpcrp_cor:AverageLengthOfServiceYearsInformationAboutReportingCompanyInformationAboutEmployees",
+                "jpcrp_cor:AverageLengthOfServiceYearsInformationOfReportingCompanyInformation",
+                "jpcrp_cor:AverageLengthOfServiceYears"
+            ],
+            "avgAgeYears": [
+                "jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees",
+                "jpcrp_cor:AverageAgeYearsInformationOfReportingCompanyInformation", 
+                "jpcrp_cor:AverageAgeYears",
+                "jpcrp_cor:AverageAge"
+            ],
+            "avgAnnualSalaryJPY": [
+                "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees",
+                "jpcrp_cor:AverageAnnualSalaryInformationOfReportingCompanyInformation",
+                "jpcrp_cor:AverageAnnualSalary"
+            ],
+            "employeeCount": [
+                "jpcrp_cor:NumberOfEmployees",
+                "jpcrp_cor:AverageNumberOfEmployees"
+            ]
         }
         
         for filename, content in honbun_files:
@@ -113,35 +129,44 @@ class EdinetAPI:
             logger.info(f"従業員の状況 섹션 발견: {filename}")
             
             # 각 지표별로 추출
-            for field, keyword_list in keywords.items():
+            for field in keywords.keys():
                 if employee_info[field] is not None:
                     continue  # 이미 찾았으면 스킵
                 
-                # 키워드로 검색
-                for keyword in keyword_list:
-                    if keyword in content:
-                        value = self._extract_value_from_context(content, keyword, filename)
-                        if value is not None:
-                            employee_info[field] = value
+                # 1. 우선 iXBRL 개념으로 검색 (가장 정확)
+                if field in ixbrl_concepts:
+                    for concept_name in ixbrl_concepts[field]:
+                        results = self._extract_value_from_ixbrl_concept(content, concept_name, filename)
+                        if results:
+                            # contextRef로 최적 값 선택
+                            best_result = self._select_best_value_by_context(results)
+                            # scale/decimals/unitRef 속성 적용하여 최종 값 계산
+                            final_value = self._apply_ixbrl_attributes(best_result, field)
+                            employee_info[field] = final_value
                             employee_info["provenance"][field] = {
                                 "file": filename,
-                                "keyword": keyword,
-                                "method": "text_search"
+                                "concept": concept_name,
+                                "contextRef": best_result['contextRef'],
+                                "unitRef": best_result['unitRef'],
+                                "scale": best_result['scale'],
+                                "method": "ixbrl_concept"
                             }
+                            logger.info(f"{field}: iXBRL 개념으로 값 추출 성공 - {best_result['value']}")
                             break
                 
-                # 태그로 검색 (키워드로 못 찾았을 때)
+                # 2. iXBRL로 못 찾으면 키워드 백업
                 if employee_info[field] is None:
-                    for tag in tags[field]:
-                        if tag in content:
-                            value = self._extract_value_from_tag(content, tag, filename)
+                    for keyword in keywords[field]:
+                        if keyword in content:
+                            value = self._extract_value_from_context(content, keyword, filename)
                             if value is not None:
                                 employee_info[field] = value
                                 employee_info["provenance"][field] = {
                                     "file": filename,
-                                    "tag": tag,
-                                    "method": "tag_search"
+                                    "keyword": keyword,
+                                    "method": "text_search_backup"
                                 }
+                                logger.info(f"{field}: 텍스트 백업으로 값 추출 - {value}")
                                 break
         
         return employee_info
@@ -174,6 +199,125 @@ class EdinetAPI:
         except Exception as e:
             logger.error(f"값 추출 중 오류: {e}")
         return None
+    
+    def _select_best_value_by_context(self, results: List[dict]) -> dict:
+        """contextRef 기준으로 최적의 값 선택"""
+        if not results:
+            return None
+            
+        if len(results) == 1:
+            return results[0]
+        
+        logger.info(f"여러 값 중 최적 선택 - 총 {len(results)}개:")
+        for i, result in enumerate(results):
+            logger.info(f"  {i+1}: {result['value']} (contextRef: {result['contextRef']})")
+        
+        # 선택 기준:
+        # 1. 전체/연결 기준 우선 (세그먼트 제외)
+        # 2. 가장 최근 연도 (Current > Prior1 > Prior2...)
+        # 3. 연결 기준 > 단독 기준
+        
+        # 컨텍스트별 우선순위 분류
+        overall_results = []      # 전체/연결 (세그먼트 없음)
+        segment_results = []      # 세그먼트별 
+        non_consol_results = []   # 단독 기준
+        
+        for result in results:
+            context_ref = result.get('contextRef') or ''
+            
+            # 세그먼트 멤버가 있는지 확인 (ReportableSegment, CorporateShared 등)
+            if any(segment in context_ref for segment in ['ReportableSegment', 'Member']):
+                if 'NonConsolidated' in context_ref:
+                    non_consol_results.append(result)
+                else:
+                    segment_results.append(result)
+            else:
+                # 세그먼트가 없는 전체/연결 기준
+                overall_results.append(result)
+        
+        # 우선순위: 전체/연결 > 세그먼트 > 단독
+        candidates = overall_results if overall_results else (segment_results if segment_results else non_consol_results)
+        
+        if not candidates:
+            candidates = results
+        
+        # 가장 최적 값 선택 (여러 기준 적용)
+        best_result = candidates[0]
+        
+        # 컨텍스트 우선순위에 따른 선택
+        def get_context_priority(context_ref):
+            """contextRef의 우선순위를 반환 (낮을수록 우선순위 높음)"""
+            if 'CurrentYear' in context_ref:
+                return 0  # 최고 우선순위
+            elif 'Prior1Year' in context_ref:
+                return 1
+            elif 'Prior2Year' in context_ref:
+                return 2
+            elif 'Prior3Year' in context_ref:
+                return 3
+            elif 'Prior4Year' in context_ref:
+                return 4
+            else:
+                return 999  # 알 수 없는 컨텍스트는 낮은 우선순위
+        
+        # 우선순위가 가장 높은 (숫자가 가장 낮은) 결과 선택
+        best_result = min(candidates, key=lambda x: get_context_priority(x.get('contextRef', '')))
+        
+        logger.info(f"최종 선택: {best_result['value']} (contextRef: {best_result['contextRef']})")
+        return best_result
+    
+    def _apply_ixbrl_attributes(self, result: dict, field: str) -> float:
+        """scale/decimals/unitRef 속성을 적용하여 최종 값 계산"""
+        try:
+            value = float(str(result['value']).replace(',', ''))
+        except (ValueError, AttributeError):
+            logger.warning(f"값 변환 실패: {result['value']}")
+            return 0.0
+        
+        scale = result.get('scale')
+        decimals = result.get('decimals')
+        unit_ref = result.get('unitRef')
+        
+        logger.info(f"속성 적용 전 - 값: {value}, scale: {scale}, decimals: {decimals}, unit: {unit_ref}")
+        
+        # scale 적용 (10^scale를 곱함)
+        if scale is not None:
+            try:
+                scale_factor = int(scale)
+                value *= (10 ** scale_factor)
+                logger.info(f"scale {scale} 적용: {result['value']} → {value}")
+            except ValueError:
+                logger.warning(f"잘못된 scale 값: {scale}")
+        
+        # decimals 적용 (음수면 scale 효과, 양수면 소수점 자릿수)
+        if decimals is not None:
+            try:
+                decimal_places = int(decimals)
+                if decimal_places < 0:
+                    # 음수 decimals는 10의 지수로 나눔 (scale과 비슷한 효과)
+                    value /= (10 ** abs(decimal_places))
+                    logger.info(f"decimals {decimals} 적용 (scale 효과): {result['value']} → {value}")
+                elif decimal_places >= 0:
+                    # 양수 decimals는 소수점 자릿수로 반올림
+                    value = round(value, decimal_places)
+                    logger.info(f"decimals {decimals} 적용 (반올림): 소수점 {decimal_places}자리")
+            except ValueError:
+                logger.warning(f"잘못된 decimals 값: {decimals}")
+        
+        # unitRef 검증 및 로깅
+        if unit_ref:
+            if field == 'avgAnnualSalaryJPY' and 'JPY' not in unit_ref.upper():
+                logger.warning(f"예상과 다른 통화 단위: {unit_ref} (JPY 예상)")
+            logger.info(f"단위 확인: {unit_ref}")
+        
+        # 필드별 타입 변환
+        if field in ['avgAnnualSalaryJPY', 'employeeCount']:
+            value = int(value)  # 정수 변환
+        else:
+            value = float(value)  # 소수점 유지
+        
+        logger.info(f"최종 적용된 값: {value}")
+        return value
     
     def _extract_employee_count(self, content: str, filename: str) -> Optional[float]:
         """종업원수 추출 (단순 방식)"""
@@ -313,22 +457,62 @@ class EdinetAPI:
             logger.error(f"연봉 추출 중 오류: {e}")
         return None
     
-    def _extract_value_from_tag(self, content: str, tag: str, filename: str) -> Optional[float]:
-        """iXBRL 태그에서 수치 추출"""
+    def _extract_value_from_ixbrl_concept(self, content: str, concept_name: str, filename: str) -> Optional[List[dict]]:
+        """iXBRL 개념(name 속성)에서 수치 추출"""
         try:
-            # ix:nonFraction 태그에서 값 추출
-            pattern = rf'<ix:nonFraction[^>]*contextRef="[^"]*"[^>]*>{tag}</ix:nonFraction>'
-            match = re.search(pattern, content)
-            if match:
-                # 태그 내용에서 숫자 추출
-                value_match = re.search(r'<ix:nonFraction[^>]*>([0-9]+\.?[0-9]*)</ix:nonFraction>', match.group(0))
-                if value_match:
-                    value = float(value_match.group(1))
-                    logger.info(f"태그 '{tag}'에서 값 추출: {value} (파일: {filename})")
-                    return value
+            # 전체 ix:nonFraction 태그 매칭 (속성과 값 모두 포함)
+            full_pattern = rf'<ix:nonFraction([^>]*name="{re.escape(concept_name)}"[^>]*)>([^<]+)</ix:nonFraction>'
+            full_matches = re.findall(full_pattern, content)
+            
+            if full_matches:
+                logger.info(f"개념 '{concept_name}'에서 {len(full_matches)}개 값 발견: {[m[1] for m in full_matches[:3]]}...")
+                
+                results = []
+                for attrs, value_text in full_matches:
+                    try:
+                        # 숫자 값 추출 (콤마 제거)
+                        clean_value = re.sub(r'[,\s]', '', value_text)
+                        if not re.match(r'^-?[\d.]+$', clean_value):
+                            continue
+                            
+                        value = float(clean_value)
+                        
+                        # 속성들 파싱 (전체 속성 문자열에서 추출)
+                        result = {
+                            'value': value,
+                            'raw_text': value_text,
+                            'contextRef': self._extract_attribute(attrs, 'contextRef'),
+                            'unitRef': self._extract_attribute(attrs, 'unitRef'),
+                            'scale': self._extract_attribute(attrs, 'scale'),
+                            'decimals': self._extract_attribute(attrs, 'decimals'),
+                            'concept': concept_name,
+                            'file': filename
+                        }
+                        results.append(result)
+                        
+                        # 디버깅용 로그
+                        logger.debug(f"추출된 값: {value}, contextRef: {result['contextRef']}, unitRef: {result['unitRef']}")
+                        
+                    except ValueError as e:
+                        logger.debug(f"값 변환 실패: {value_text} - {e}")
+                        continue
+                
+                if results:
+                    logger.info(f"개념 '{concept_name}'에서 {len(results)}개 유효한 값 추출")
+                    return results
+                    
         except Exception as e:
-            logger.error(f"태그 값 추출 중 오류: {e}")
+            logger.error(f"iXBRL 개념 추출 중 오류: {e}")
         return None
+    
+    def _extract_attribute(self, attrs_string: str, attr_name: str) -> Optional[str]:
+        """속성 문자열에서 특정 속성값 추출"""
+        try:
+            pattern = rf'{attr_name}="([^"]*)"'
+            match = re.search(pattern, attrs_string)
+            return match.group(1) if match else None
+        except:
+            return None
 
 def parse_edinet_basic_info(company_code: str) -> EdinetBasic:
     """EDINET 기업 기본 정보 파싱 (현재는 코드만 저장)"""
