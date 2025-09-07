@@ -9,8 +9,11 @@ import zipfile
 import io
 import re
 import os
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, date
+import json
+from typing import Dict, List, Optional, Tuple, NamedTuple
+from datetime import datetime, date, timedelta
+from dataclasses import dataclass
+from pathlib import Path
 from loguru import logger
 from bs4 import BeautifulSoup
 from ..models import EdinetData, EdinetBasic, EdinetHR, EdinetFinancials, IRDocument
@@ -27,6 +30,15 @@ except ImportError:
 EDINET_API_BASE = "https://api.edinet-fsa.go.jp/api/v2"
 EDINET_API_KEY = os.getenv("EDINET_API_KEY", "your-api-key-here")
 
+@dataclass
+class CompanyDocument:
+    """발견된 기업 문서 정보"""
+    document_id: str
+    company_name: str 
+    submitted_date: str
+    doc_type: str
+    company_key: str  # 내부 식별용
+
 class EdinetAPI:
     """EDINET API 클라이언트"""
     
@@ -42,11 +54,31 @@ class EdinetAPI:
         if self.session:
             await self.session.aclose()
     
-    async def get_document_package(self, company_code: str, doc_type: str = "1") -> Optional[bytes]:
+    async def get_document_list(self, date: str) -> List[dict]:
+        """특정 날짜의 문서 리스트 조회"""
+        try:
+            response = await self.session.get(
+                f"{self.base_url}/documents.json",
+                params={"date": date, "type": 2},  # type=2: 메타데이터만
+                headers={"Ocp-Apim-Subscription-Key": EDINET_API_KEY}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("results", [])
+            else:
+                logger.warning(f"문서 리스트 조회 실패 ({date}): {response.status_code}")
+                
+        except Exception as e:
+            logger.error(f"문서 리스트 조회 중 오류 ({date}): {e}")
+        
+        return []
+
+    async def get_document_package(self, document_id: str, doc_type: str = "1") -> Optional[bytes]:
         """유가증권보고서 패키지 다운로드 (type=1: ZIP 파일)"""
         try:
             response = await self.session.get(
-                f"{self.base_url}/documents/{company_code}",
+                f"{self.base_url}/documents/{document_id}",
                 params={"type": doc_type},  # 1: ZIP 파일 (iXBRL 포함)
                 headers={"Ocp-Apim-Subscription-Key": EDINET_API_KEY}
             )
@@ -527,12 +559,260 @@ def parse_edinet_financials(company_code: str) -> EdinetFinancials:
     financials.fiscalYear = datetime.now().year
     return financials
 
+class CompanyReportUpdater:
+    """기업 리포트 최신화 관리자"""
+    
+    def __init__(self):
+        # 타겟 기업들과 매칭 키워드 (모두 본사만 정확히 매칭)
+        self.target_companies = {
+            "rakuten": ["楽天グループ株式会社"],
+            "mercari": ["株式会社メルカリ"],  
+            "cyberagent": ["株式会社サイバーエージェント"],
+            "lineyahoo": ["ＬＩＮＥヤフー株式会社"],
+            "recruit": ["株式会社リクルートホールディングス"],
+            "dena": ["株式会社ディー・エヌ・エー"],
+            "sony": ["ソニーグループ株式会社"],
+            "softbank": ["ソフトバンクグループ株式会社"],
+            "fujitsu": ["富士通株式会社"],  # 본사로 변경
+            "nttdata": ["株式会社ＮＴＴデータグループ"]
+        }
+        
+        # 상태 저장 파일 경로
+        self.state_file = Path("data/last_check_dates.json")
+        self.discovered_reports = {}  # company_key -> 최신 문서 정보
+    
+    def load_last_check_dates(self) -> Dict[str, str]:
+        """마지막 체크 날짜 로드"""
+        try:
+            if self.state_file.exists():
+                with open(self.state_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"상태 파일 로드 실패: {e}")
+        
+        # 기본값: 18개월 전부터 시작
+        default_date = (datetime.now() - timedelta(days=18*30)).strftime("%Y-%m-%d")
+        return {company_key: default_date for company_key in self.target_companies.keys()}
+    
+    def save_last_check_dates(self, dates: Dict[str, str]):
+        """마지막 체크 날짜 저장"""
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.state_file, 'w') as f:
+                json.dump(dates, f, indent=2)
+        except Exception as e:
+            logger.error(f"상태 파일 저장 실패: {e}")
+    
+    def match_company(self, company_name: str) -> Optional[str]:
+        """회사명으로 타겟 기업 매칭"""
+        for company_key, keywords in self.target_companies.items():
+            for keyword in keywords:
+                if keyword in company_name:
+                    return company_key
+        return None
+    
+    def date_range(self, start_date: datetime, end_date: datetime):
+        """날짜 범위 생성 (역순)"""
+        current_date = end_date
+        while current_date >= start_date:
+            yield current_date.strftime("%Y-%m-%d")
+            current_date -= timedelta(days=1)
+    
+    async def scan_date_for_reports(self, date: str, api: EdinetAPI) -> List[CompanyDocument]:
+        """특정 날짜에서 타겟 기업들의 유가증권보고서 검색"""
+        documents = await api.get_document_list(date)
+        found_reports = []
+        
+        for doc in documents:
+            # 유가증권보고서만 (docTypeCode: 120)
+            if doc.get("docTypeCode") != "120":
+                continue
+            
+            company_name = doc.get("filerName", "")
+            company_key = self.match_company(company_name)
+            
+            if company_key:
+                report = CompanyDocument(
+                    document_id=doc.get("docID"),
+                    company_name=company_name,
+                    submitted_date=date,
+                    doc_type="120",
+                    company_key=company_key
+                )
+                found_reports.append(report)
+                logger.info(f"유가증권보고서 발견: {company_name} ({date}) - {doc.get('docID')}")
+        
+        return found_reports
+    
+    async def find_latest_reports(self, months_back: int = 18) -> Dict[str, CompanyDocument]:
+        """최신 유가증권보고서들 검색"""
+        logger.info(f"최근 {months_back}개월간 유가증권보고서 검색 시작...")
+        
+        # 날짜 범위 설정
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=months_back * 30)
+        
+        # 각 회사별 최신 리포트 저장
+        latest_reports = {}
+        dates_scanned = 0
+        
+        async with EdinetAPI() as api:
+            # 날짜별 스캔 (최신 날짜부터)
+            for date_str in self.date_range(start_date, end_date):
+                dates_scanned += 1
+                
+                # 진행률 표시
+                if dates_scanned % 30 == 0:
+                    logger.info(f"진행률: {dates_scanned}일 스캔 완료 ({date_str})")
+                
+                # 해당 날짜의 리포트들 검색
+                found_reports = await self.scan_date_for_reports(date_str, api)
+                
+                # 각 회사별로 가장 최근 리포트 업데이트
+                for report in found_reports:
+                    company_key = report.company_key
+                    
+                    # 더 최신 리포트이거나 처음 발견한 경우
+                    if (company_key not in latest_reports or 
+                        report.submitted_date > latest_reports[company_key].submitted_date):
+                        
+                        latest_reports[company_key] = report
+                        logger.info(f"✨ {company_key} 최신 리포트 업데이트: {report.submitted_date}")
+                
+                # 모든 회사의 리포트를 찾았으면 조기 종료
+                if len(latest_reports) == len(self.target_companies):
+                    logger.info(f"🎉 모든 회사의 리포트 발견! {dates_scanned}일 스캔으로 완료")
+                    break
+                
+                # API 부하 방지를 위한 딜레이
+                await asyncio.sleep(0.1)
+        
+        # 결과 요약
+        logger.info(f"\n📊 최신화 결과 요약:")
+        logger.info(f"- 스캔 기간: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"- 스캔 일수: {dates_scanned}일")
+        logger.info(f"- 발견한 회사: {len(latest_reports)}/{len(self.target_companies)}개")
+        
+        for company_key, report in latest_reports.items():
+            logger.info(f"  • {company_key}: {report.company_name} ({report.submitted_date})")
+        
+        # 못 찾은 회사들
+        missing_companies = set(self.target_companies.keys()) - set(latest_reports.keys())
+        if missing_companies:
+            logger.warning(f"❌ 리포트를 찾지 못한 회사들: {missing_companies}")
+        
+        return latest_reports
+    
+    async def update_company_data(self, company_key: str, document: CompanyDocument) -> bool:
+        """특정 회사의 데이터 업데이트"""
+        logger.info(f"🔄 {company_key} 데이터 업데이트 시작...")
+        
+        try:
+            async with EdinetAPI() as api:
+                # 문서 다운로드
+                zip_content = await api.get_document_package(document.document_id, doc_type="1")
+                
+                if zip_content:
+                    # honbun 파일 추출 및 파싱
+                    honbun_files = api.extract_honbun_files(zip_content)
+                    
+                    if honbun_files:
+                        employee_info = api.parse_employee_info(honbun_files)
+                        
+                        # EdinetData 객체 생성
+                        edinet_data = EdinetData()
+                        
+                        # 기본 정보 설정
+                        edinet_data.basic = EdinetBasic()
+                        edinet_data.basic.name = document.company_name
+                        edinet_data.basic.employee_count = employee_info.get("employeeCount")
+                        
+                        # HR 정보 설정
+                        edinet_data.hr.avgTenureYears = employee_info.get("avgTenureYears")
+                        edinet_data.hr.avgAgeYears = employee_info.get("avgAgeYears")
+                        edinet_data.hr.avgAnnualSalaryJPY = employee_info.get("avgAnnualSalaryJPY")
+                        
+                        # 재무 정보 설정
+                        edinet_data.financials = EdinetFinancials()
+                        edinet_data.financials.fiscalYear = datetime.now().year
+                        
+                        # 출처 정보 설정
+                        edinet_data.provenance = {
+                            "source": "EDINET API v2",
+                            "document_id": document.document_id,
+                            "submitted_date": document.submitted_date,
+                            "fetched_at": datetime.now().isoformat(),
+                            "company_key": company_key,
+                            "employee_info_provenance": employee_info.get("provenance", {})
+                        }
+                        
+                        # 데이터 저장
+                        await self.save_company_data(company_key, edinet_data)
+                        
+                        logger.info(f"✅ {company_key} 업데이트 완료!")
+                        return True
+                    else:
+                        logger.error(f"❌ {company_key} honbun 파일 추출 실패")
+                else:
+                    logger.error(f"❌ {company_key} 문서 다운로드 실패")
+                    
+        except Exception as e:
+            logger.error(f"❌ {company_key} 업데이트 중 오류: {e}")
+        
+        return False
+    
+    async def save_company_data(self, company_key: str, edinet_data: EdinetData):
+        """회사 데이터 저장"""
+        output_path = Path(f"data/edinet_reports/{company_key}.json")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # EdinetData를 dict로 변환하여 저장
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(edinet_data.model_dump(), f, ensure_ascii=False, indent=2, default=str)
+        
+        logger.info(f"💾 {company_key} 데이터 저장: {output_path}")
+    
+    async def run_full_update(self) -> Dict[str, bool]:
+        """전체 최신화 프로세스 실행"""
+        logger.info("🚀 EDINET 유가증권보고서 최신화 시작...")
+        
+        # 1. 최신 리포트들 검색
+        latest_reports = await self.find_latest_reports()
+        
+        if not latest_reports:
+            logger.warning("검색된 리포트가 없습니다.")
+            return {}
+        
+        # 2. 각 회사별 데이터 업데이트
+        update_results = {}
+        
+        for company_key, document in latest_reports.items():
+            logger.info(f"\n📋 {company_key} 처리 중...")
+            success = await self.update_company_data(company_key, document)
+            update_results[company_key] = success
+            
+            # API 부하 방지
+            await asyncio.sleep(2.0)
+        
+        # 3. 결과 요약
+        successful_updates = sum(update_results.values())
+        logger.info(f"\n🎊 최신화 완료!")
+        logger.info(f"성공: {successful_updates}/{len(update_results)}개 회사")
+        
+        # 성공한 회사들
+        for company_key, success in update_results.items():
+            status = "✅" if success else "❌"
+            logger.info(f"  {status} {company_key}")
+        
+        return update_results
+
+
 async def fetch_edinet_data(company_code: str) -> EdinetData:
     """EDINET에서 기업 데이터 종합 수집"""
     edinet_data = EdinetData()
     
     async with EdinetAPI() as api:
-        # 1. 유가증권보고서 패키지 다운로드
+        # 1. 유가증권보고서 패키지 다운로드 (기존 호환성을 위해 document_id로 처리)
         zip_content = await api.get_document_package(company_code)
         if zip_content:
             # 2. honbun 파일들 추출
@@ -588,5 +868,18 @@ async def test_edinet_api():
     
     return data
 
+# 최신화 실행 함수
+async def run_edinet_update():
+    """EDINET 최신화 실행"""
+    updater = CompanyReportUpdater()
+    results = await updater.run_full_update()
+    return results
+
 if __name__ == "__main__":
-    asyncio.run(test_edinet_api())
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "update":
+        # python -m src.jap_syu.utils.edinet update
+        asyncio.run(run_edinet_update())
+    else:
+        # 기존 테스트 실행
+        asyncio.run(test_edinet_api())
