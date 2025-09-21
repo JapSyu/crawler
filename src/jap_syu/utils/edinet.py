@@ -13,6 +13,13 @@ import json
 from typing import Dict, List, Optional, Tuple, NamedTuple
 from datetime import datetime, date, timedelta
 from dataclasses import dataclass
+
+# .env 파일 로드
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from pathlib import Path
 from loguru import logger
 from bs4 import BeautifulSoup
@@ -28,7 +35,7 @@ except ImportError:
 
 # EDINET API 설정
 EDINET_API_BASE = "https://api.edinet-fsa.go.jp/api/v2"
-EDINET_API_KEY = os.getenv("EDINET_API_KEY", "your-api-key-here")
+EDINET_API_KEY = os.getenv("EDINET_API_KEY")
 
 @dataclass
 class CompanyDocument:
@@ -38,6 +45,7 @@ class CompanyDocument:
     submitted_date: str
     doc_type: str
     company_key: str  # 내부 식별용
+    sec_code: str = None  # 상장번호
 
 class EdinetAPI:
     """EDINET API 클라이언트"""
@@ -45,6 +53,8 @@ class EdinetAPI:
     def __init__(self):
         self.base_url = EDINET_API_BASE
         self.session = None
+        
+    
     
     async def __aenter__(self):
         self.session = httpx.AsyncClient(timeout=30.0)
@@ -111,6 +121,111 @@ class EdinetAPI:
         
         return honbun_files
     
+    def extract_header_file(self, zip_content: bytes) -> Optional[Tuple[str, str]]:
+        """ZIP 파일에서 header iXBRL 파일 추출"""
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
+                for file_info in zip_file.filelist:
+                    filename = file_info.filename
+                    if "header" in filename and ("ixbrl" in filename or filename.endswith('.htm')):
+                        content = zip_file.read(filename).decode('utf-8', errors='ignore')
+                        logger.info(f"header 파일 발견: {filename}")
+                        return (filename, content)
+        
+        except Exception as e:
+            logger.error(f"header 파일 처리 중 오류: {e}")
+        
+        return None
+    
+    def parse_basic_info_from_header(self, header_content: str, filename: str) -> Dict[str, any]:
+        """header 파일에서 기본 정보 추출"""
+        basic_info = {
+            "name_en": "",
+            "headquarters": "",
+            "founded_year": None,
+            "sec_code": None,
+        }
+        
+        # 1. 영문명 추출
+        english_patterns = [
+            r'CompanyNameInEnglishCoverPage">([^<]+)</ix:nonNumeric>',
+            r'CompanyNameInEnglish[^>]*>([^<]+)</ix:',
+            r'【英訳名】[^>]*>([^<]+)<',
+        ]
+        
+        for pattern in english_patterns:
+            match = re.search(pattern, header_content, re.IGNORECASE)
+            if match:
+                name_en = match.group(1).strip()
+                if len(name_en) > 5:  # 유효한 영문명인 경우
+                    basic_info["name_en"] = name_en
+                    logger.info(f"header에서 영문명 추출: {name_en} (파일: {filename})")
+                    break
+        
+        # 2. 본점 주소 추출
+        address_patterns = [
+            r'東京都[^<\n)]+\d+番?\d*号?',
+            r'〒\d{3}-\d{4}[^<\n]+',
+            r'本店[^>]*>([^<]+)',
+            r'所在地[^>]*>([^<]+)',
+        ]
+        
+        for pattern in address_patterns:
+            matches = re.findall(pattern, header_content, re.IGNORECASE)
+            if matches:
+                # 가장 완전해 보이는 주소 선택 (東京都로 시작하고 번지수가 있는 것) WHY? 도쿄 아니면 어쩔건데
+                for address in matches:
+                    clean_address = address.strip()
+                    if (clean_address.startswith('東京都') and 
+                        '番' in clean_address and 
+                        len(clean_address) > 10):
+                        basic_info["headquarters"] = clean_address
+                        logger.info(f"header에서 본점 주소 추출: {clean_address} (파일: {filename})")
+                        break
+                if basic_info["headquarters"]:
+                    break
+        
+        # 3. 설립일 추출 (실제 회사 설립일, 보고서 날짜가 아닌)　이건 본문에서 찾아야할듯. 헤더엔 안나와있음
+        # 헤더에서 설립년도 추출 비활성화 - 사업년도 계산 우선 사용
+        # founded_patterns = [
+        #     r'設立[^>]*>([^<]*(\d{4})年(\d{1,2})月(\d{1,2})日[^<]*)',
+        #     r'設立年月日[^>]*>([^<]*(\d{4})年(\d{1,2})月(\d{1,2})日[^<]*)',
+        #     r'創立[^>]*>([^<]*(\d{4})年(\d{1,2})月(\d{1,2})日[^<]*)',
+        # ]
+        # 
+        # for pattern in founded_patterns:
+        #     matches = re.findall(pattern, header_content)
+        #     if matches:
+        #         for match in matches:
+        #             year = int(match[1]) if len(match) > 1 else None
+        #             # 1800년대~2000년대 초반의 합리적인 설립년도만 허용
+        #             if year and 1800 <= year <= 2020:
+        #                 basic_info["founded_year"] = year
+        #                 logger.info(f"header에서 설립년도 추출: {year} (파일: {filename})")
+        #                 break
+        #         if basic_info["founded_year"]:
+        #             break
+        logger.info(f"헤더에서 설립년도 추출 건너뜀 - 사업년도 계산 우선 사용 (파일: {filename})")
+        
+        # 4. 상장번호 추출 (iXBRL 태그에서)
+        sec_code_patterns = [
+            r'SecurityCodeDEI">(\d{4})</ix:nonNumeric>',
+            r'securityCode[^0-9]*(\d{4})',
+            r'证券[コ]?[ー]?[ド][^0-9]*(\d{4})',
+            r'[証券]?[コ]?[ー]?[ド]\s*[：:]\s*(\d{4})',
+        ]
+        
+        for pattern in sec_code_patterns:
+            match = re.search(pattern, header_content, re.IGNORECASE)
+            if match:
+                sec_code = match.group(1)
+                if len(sec_code) == 4 and sec_code.isdigit():
+                    basic_info["sec_code"] = sec_code
+                    logger.info(f"header에서 상장번호 추출: {sec_code} (파일: {filename})")
+                    break
+        
+        return basic_info
+    
     def parse_employee_info(self, honbun_files: List[Tuple[str, str]]) -> Dict[str, any]:
         """honbun 파일들에서 인사 정보 추출"""
         employee_info = {
@@ -154,11 +269,7 @@ class EdinetAPI:
         }
         
         for filename, content in honbun_files:
-            # 従業員の状況 섹션이 있는지 확인
-            if "従業員の状況" not in content:
-                continue
-            
-            logger.info(f"従業員の状況 섹션 발견: {filename}")
+            logger.info(f"직원 정보 추출 시도: {filename}")
             
             # 각 지표별로 추출
             for field in keywords.keys():
@@ -203,6 +314,561 @@ class EdinetAPI:
         
         return employee_info
     
+    def parse_basic_info(self, honbun_files: List[Tuple[str, str]], zip_content: bytes = None) -> Dict[str, any]:
+        """honbun 파일들과 header 파일에서 기업 기본 정보 추출"""
+        logger.info(f"🔍 parse_basic_info 호출됨 - {len(honbun_files)}개 honbun 파일 처리")
+        basic_info = {
+            "name": "",
+            "name_en": "",
+            "headquarters": "",
+            "founded_year": None,
+            "sec_code": None,
+            "provenance": {}
+        }
+        
+        # 헤더에서 추출한 설립년도 임시 저장 (연혁 우선, 없으면 사용)
+        header_founded_year = None
+        header_filename_for_founded = None
+        
+        # 먼저 header 파일에서 정보 추출 (우선순위)
+        if zip_content:
+            header_file = self.extract_header_file(zip_content)
+            if header_file:
+                filename, content = header_file
+                header_info = self.parse_basic_info_from_header(content, filename)
+                
+                # header에서 추출한 정보로 우선 채움
+                if header_info["name_en"]:
+                    basic_info["name_en"] = header_info["name_en"]
+                    basic_info["provenance"]["name_en"] = {"file": filename, "method": "header_ixbrl"}
+                
+                if header_info["headquarters"]:
+                    basic_info["headquarters"] = header_info["headquarters"]
+                    basic_info["provenance"]["headquarters"] = {"file": filename, "method": "header_ixbrl"}
+                
+                # 사업년도에서 설립년도 계산 (header에서 우선 시도)
+                header_founded_year = self._extract_founded_year(content, filename, zip_content)
+                if header_founded_year:
+                    basic_info["founded_year"] = header_founded_year
+                    basic_info["provenance"]["founded_year"] = {"file": filename, "method": "header_business_year"}
+                    logger.info(f"헤더에서 설립년도 계산 완료: {header_founded_year}년 (파일: {filename})")
+                
+                if header_info["sec_code"]:
+                    basic_info["sec_code"] = header_info["sec_code"]
+                    basic_info["provenance"]["sec_code"] = {"file": filename, "method": "header_ixbrl"}
+        
+        for filename, content in honbun_files:
+            # 1. 회사명 추출 (提出会社の状況)
+            if not basic_info["name"]:
+                name = self._extract_company_name(content, filename)
+                if name:
+                    basic_info["name"] = name
+                    basic_info["provenance"]["name"] = {"file": filename, "method": "regex"}
+            
+            # 2. 영문명 추출 (英訳名)
+            if not basic_info["name_en"]:
+                name_en = self._extract_company_name_en(content, filename)
+                if name_en:
+                    basic_info["name_en"] = name_en
+                    basic_info["provenance"]["name_en"] = {"file": filename, "method": "regex"}
+            
+            # 3. 본점 소재지 추출 (本店の所在の場所)
+            if not basic_info["headquarters"]:
+                headquarters = self._extract_headquarters(content, filename)
+                if headquarters:
+                    basic_info["headquarters"] = headquarters
+                    basic_info["provenance"]["headquarters"] = {"file": filename, "method": "regex"}
+            
+            # 4. 설립년도는 이미 header에서 처리됨 (연혁 추출은 성능상 스킵)
+            # 헤더의 사업년도 정보가 더 정확하므로 우선 사용
+            
+            # 5. 상장번호 추출 (증券コード)
+            if not basic_info["sec_code"]:
+                sec_code = self._extract_security_code(content, filename)
+                if sec_code:
+                    basic_info["sec_code"] = sec_code
+                    basic_info["provenance"]["sec_code"] = {"file": filename, "method": "regex"}
+        
+        # 설립년도는 이미 header에서 처리됨
+        
+        return basic_info
+    
+    def _extract_company_name(self, content: str, filename: str) -> Optional[str]:
+        """회사명 추출"""
+        patterns = [
+            r"会社名[^a-zA-Zａ-ｚ０-９]*?([^\s\n]+株式会社[^\s\n]*)",
+            r"商号[^a-zA-Zａ-ｚ０-９]*?([^\s\n]+株式会社[^\s\n]*)",
+            r"提出会社の状況[^a-zA-Z]*?会社名[^a-zA-Z]*?([^\s\n]+株式会社[^\s\n]*)"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content)
+            if match:
+                name = match.group(1).strip()
+                
+                # HTML 태그 제거
+                name = re.sub(r'<[^>]+>', '', name)
+                # 특수문자 제거 (「」, (), 、, 。, 등)
+                name = re.sub(r'[「」（）()、。]', '', name)
+                name = re.sub(r'\s+', ' ', name).strip()
+                name = name.rstrip('.,').strip()
+                
+                # 유효성 검사
+                if name and len(name) > 3 and not re.search(r'[<>]', name):
+                    logger.info(f"회사명 추출: {name} (파일: {filename})")
+                    return name
+        return None
+    
+    def _extract_company_name_en(self, content: str, filename: str) -> Optional[str]:
+        """영문명 추출 (fallback) - 헤더에서 찾지 못한 경우의 백업"""
+        
+        # 일반적인 영문 회사명 패턴들 (본문에서 Inc, Corp, Company 등 찾기)
+        
+        patterns = [
+            r'([A-Z][A-Za-z\s]*Holdings[A-Za-z\s]*Limited)',
+            r'([A-Z][A-Za-z\s]*Corporation)',
+            r'([A-Z][A-Za-z\s]*Holdings)',
+            r'([A-Z][A-Za-z\s]*Group)',
+            r'([A-Z][A-Za-z\s]*Inc\.?)',
+            r'([A-Z][A-Za-z\s]*Corp\.?)', 
+            r'([A-Z][A-Za-z\s]*Company)',
+            r'([A-Z][A-Za-z\s]*Co\.?)',
+            r'([A-Z][A-Za-z\s]*Ltd\.?)',
+            r'([A-Z][A-Za-z\s]*Limited)',
+        ]
+        
+        for i, pattern in enumerate(patterns):
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                name_en = match.group(1).strip()
+                
+                # HTML 태그 제거
+                name_en = re.sub(r'<[^>]+>', '', name_en)
+                # 불필요한 문자들 제거
+                name_en = re.sub(r'[、。）\)]', '', name_en)
+                name_en = re.sub(r'\s+', ' ', name_en).strip()
+                name_en = name_en.rstrip('.,').strip()
+                
+                # 유효성 체크
+                if (len(name_en) >= 8 and 
+                    re.search(r'[A-Z]', name_en) and  # 대문자 포함
+                    ('Holdings' in name_en or 'Limited' in name_en or 'Inc' in name_en or 'Corp' in name_en or 'Company' in name_en)):
+                    logger.info(f"영문명 추출 성공 (패턴 {i+1}): {name_en} (파일: {filename})")
+                    return name_en
+                elif len(name_en) >= 5:
+                    logger.debug(f"영문명 후보 (패턴 {i+1}): '{name_en}' - 조건 미달")
+        
+        logger.warning(f"영문명을 찾을 수 없음 (파일: {filename})")
+        return None
+    
+    def _extract_headquarters(self, content: str, filename: str) -> Optional[str]:
+        """본점 소재지 추출 (本店の所在の場所)"""
+        patterns = [
+            # 일본 주요 도도부현 주소 패턴들 (구체적인 주소)
+            r"(東京都[^<\n)]+\d+番?\d*号?)",
+            r"(大阪[府市][^<\n)]+\d+番?\d*号?)",
+            r"(京都[府市][^<\n)]+\d+番?\d*号?)",
+            r"(神奈川県[^<\n)]+\d+番?\d*号?)",
+            r"(愛知県[^<\n)]+\d+番?\d*号?)",
+            r"(福岡県[^<\n)]+\d+番?\d*号?)",
+            r"(北海道[^<\n)]+\d+番?\d*号?)",
+            r"([^<\n)]*[都道府県市区町村][^<\n)]+\d+番?\d*号?)",  # 일반적인 패턴
+            
+            # 우편번호가 있는 주소
+            r"(〒\d{3}-\d{4}[^<\n]+)",
+            
+            # 전통적인 본점 패턴들
+            r"本店の所在の場所[^>]*>([^<]+)",
+            r"本店の所在の場所[^\n]*?([^\n<]+)",
+            r"本店所在地[^>]*>([^<]+)",
+            r"本店所在地[^\n]*?([^\n<]+)",
+            r"本社所在地[^>]*>([^<]+)",
+            r"本社所在地[^\n]*?([^\n<]+)"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content)
+            if match:
+                # 그룹이 있는 패턴인지 확인 (괄호가 포함된 패턴)
+                if match.groups():
+                    headquarters = match.group(1).strip()
+                else:
+                    headquarters = match.group(0).strip()
+                    
+                # HTML 태그 제거
+                headquarters = re.sub(r'<[^>]+>', '', headquarters)
+                # 불필요한 문자 제거
+                headquarters = re.sub(r'^[:\s・]*', '', headquarters)
+                headquarters = re.sub(r'[>\]]*$', '', headquarters)  # 끝의 > 문자 제거
+                headquarters = headquarters.strip()
+                
+                # 유효성 검사 (HTML 태그나 이상한 문자들 필터링)
+                if (headquarters and len(headquarters) > 3 and 
+                    not re.search(r'[<>]', headquarters) and
+                    not headquarters.startswith('を') and
+                    not headquarters.endswith('</b></p>')):
+                    logger.info(f"본점 소재지 추출: {headquarters} (파일: {filename})")
+                    return headquarters
+        return None
+    
+    def _extract_submission_year(self, content: str, filename: str) -> Optional[int]:
+        """제출일(提出日)에서 년도 추출"""
+        try:
+            # 제출일 패턴들 (다양한 형태 지원)
+            submission_patterns = [
+                r"提出日[^0-9]*?(\d{4})年(\d{1,2})月(\d{1,2})日",  # 提出日: 2025年6月23日
+                r"提出日[^0-9]*?(\d{4})年",  # 提出日: 2025年
+                r"提出年月日[^0-9]*?(\d{4})年(\d{1,2})月(\d{1,2})日",  # 提出年月日: 2025年6月23日
+                r"提出年月日[^0-9]*?(\d{4})年",  # 提出年月日: 2025年
+                r"SubmissionDate[^0-9]*?(\d{4})",  # SubmissionDate: 2025
+                r"DocumentPeriodEndDate[^0-9]*?(\d{4})",  # DocumentPeriodEndDate: 2025
+                # iXBRL 태그에서 추출
+                r'<ix:nonNumeric[^>]*name="[^"]*SubmissionDate[^"]*"[^>]*>.*?(\d{4})年.*?</ix:nonNumeric>',
+                r'<ix:nonNumeric[^>]*name="[^"]*DocumentPeriodEndDate[^"]*"[^>]*>.*?(\d{4})年.*?</ix:nonNumeric>',
+                # 파일명에서 추출 (예: 2025-06-23)
+                r'(\d{4})-\d{2}-\d{2}',
+            ]
+            
+            for pattern in submission_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE | re.DOTALL)
+                if matches:
+                    # 첫 번째 매치에서 년도 추출
+                    year_match = matches[0]
+                    if isinstance(year_match, tuple):
+                        year = int(year_match[0])  # 첫 번째 그룹이 년도
+                    else:
+                        year = int(year_match)
+                    
+                    # 합리적인 년도 범위 체크
+                    if 2020 <= year <= 2030:
+                        logger.info(f"제출일에서 년도 추출: {year}년 (패턴: {pattern}, 파일: {filename})")
+                        return year
+                    else:
+                        logger.debug(f"제출일 년도 범위 벗어남: {year}년 (파일: {filename})")
+            
+            # 파일명에서 제출일 년도 추출 시도 (마지막 날짜가 제출일)
+            # 예: 2025-03-31_01_2025-06-20 → 2025-06-20이 제출일
+            filename_date_matches = re.findall(r'(\d{4})-(\d{2})-(\d{2})', filename)
+            if filename_date_matches:
+                # 마지막 날짜를 제출일로 간주
+                submission_date = filename_date_matches[-1]
+                year = int(submission_date[0])
+                if 2020 <= year <= 2030:
+                    logger.info(f"파일명에서 제출일 년도 추출: {year}년 (파일: {filename})")
+                    return year
+            
+            logger.warning(f"제출일을 찾을 수 없음 (파일: {filename})")
+            return None
+            
+        except Exception as e:
+            logger.error(f"제출일 추출 중 오류: {e} (파일: {filename})")
+            return None
+    
+    def _extract_founded_year(self, content: str, filename: str, zip_content: bytes = None) -> Optional[int]:
+        """설립년도 추출 (事業年度 주기에서 계산)"""
+        try:
+            # 1. 먼저 제출일(提出日) 추출
+            submission_year = self._extract_submission_year(content, filename)
+            if not submission_year:
+                logger.warning(f"제출일을 찾을 수 없어 설립년도 계산 불가 (파일: {filename})")
+                return None
+            
+            logger.info(f"📅 제출일 기준년도: {submission_year}년")
+            
+            # 2. 事業年度(사업년도) 주기 정보에서 계산 - HTML 태그 고려
+            business_year_patterns = [
+                r"第(\d+)期[^<]*?事業年度",  # 第65期 (자 2024년...至 2025년...事業年度)
+                r"第(\d+)期[^<]*?\(",  # 第65期 (자 2024년...
+                r"第(\d+)期",  # 第65期 단독
+                r"(\d+)期[^<]*?事業年度",  # 65期...事業年度
+                r"事業年度[^<]*?第(\d+)期"  # 事業年度...第65期
+            ]
+            
+            # HTML 태그 내부도 검색 (업데이트: 년도도 함께 추출)
+            html_patterns = [
+                r'<ix:nonNumeric[^>]*>.*?第(\d+)期.*?(\d{4})年.*?</ix:nonNumeric>',  # HTML 태그 내부에서 기수와 년도 함께
+                r'<ix:nonNumeric[^>]*>.*?第(\d+)期.*?</ix:nonNumeric>',  # HTML 태그 내부
+                r'>第(\d+)期[^<]*?事業年度<',  # 태그 사이
+                r'>第(\d+)期[^<]*?\(<',  # 태그 사이
+            ]
+            
+            # 디버깅: 실제 텍스트 일부 확인
+            header_text = content[:3000]
+            logger.info(f"🔍 설립년도 계산 디버깅 - 문서 헤더 (처음 1000자): {header_text[:1000]}")
+            
+            all_patterns = business_year_patterns + html_patterns
+            
+            for pattern in all_patterns:
+                matches = re.findall(pattern, content[:15000], re.DOTALL)  # 더 넓은 범위에서 검색
+                if matches:
+                    logger.info(f"📊 사업년도 패턴 매칭: {pattern} → {matches}")
+                    
+                    # 매치 결과 분석
+                    if isinstance(matches[0], tuple) and len(matches[0]) >= 2:
+                        # 튜플인 경우: (기수, 년도) 형태
+                        period = int(matches[0][0])
+                        # 제출일 기준년도 사용
+                        current_year = submission_year
+                        logger.info(f"📊 패턴에서 기수 추출: 제{period}기, 제출일 기준년도: {current_year}년")
+                    else:
+                        # 단일 값인 경우: 기수만 추출
+                        period = int(matches[0]) if isinstance(matches[0], str) else int(matches[0][0] if isinstance(matches[0], tuple) else matches[0])
+                        # 제출일 기준년도 사용
+                        current_year = submission_year
+                        logger.info(f"📊 패턴에서 기수 추출: 제{period}기, 제출일 기준년도: {current_year}년")
+                    
+                    if current_year:
+                        founded_year = current_year - period + 1  # +1은 창립년도 보정
+                        logger.info(f"🧮 계산: {current_year}년 - {period}기 + 1 = {founded_year}년")
+                        
+                        if 1850 <= founded_year <= current_year:
+                            logger.info(f"事業年度에서 설립년도 계산: 제{period}기 → {founded_year}년 (파일: {filename})")
+                            return founded_year
+                        else:
+                            logger.warning(f"설립년도 범위 벗어남: {founded_year}년 (1850-{current_year} 범위)")
+                    else:
+                        logger.warning(f"기준년도를 찾을 수 없음 (패턴 매칭: {pattern})")
+                else:
+                    logger.debug(f"❌ 패턴 매칭 실패: {pattern}")
+            
+            # 3. 사업년도 방법이 실패하면 honbun 파일들에서 설립년도 직접 검색
+            logger.info(f"honbun 파일들에서 설립년도 직접 검색 시도...")
+            
+            # honbun 파일들에서 설립년도 패턴 검색 (우선순위 순서)
+            founded_patterns = [
+                # 가장 정확한 패턴들 (1900년대 설립년도 우선)
+                r"(19\d{2})年.*?設立",
+                r"(19\d{2})年.*?創立", 
+                r"(19\d{2})年.*?創業",
+                # 일반적인 패턴들 (년도가 앞에 오는 경우)
+                r"(\d{4})年.*?設立",
+                r"(\d{4})年.*?創立", 
+                r"(\d{4})年.*?創業",
+                # 일반적인 패턴들 (설립이 앞에 오는 경우)
+                r"設立.*?(\d{4})年",
+                r"創立.*?(\d{4})年", 
+                r"設立年.*?(\d{4})",
+                r"Founded.*?(\d{4})",
+                r"Established.*?(\d{4})",
+                # 특수 패턴들
+                r"会社設立.*?(\d{4})年",
+                r"法人設立.*?(\d{4})年",
+                r"設立登記.*?(\d{4})年",
+                r"創業.*?(\d{4})年"
+            ]
+            
+            # honbun 파일들에서 검색 (header 파일 + honbun 파일들)
+            search_contents = [(filename, content)]
+            
+            # honbun 파일들도 추가
+            honbun_files = self.extract_honbun_files(zip_content) if hasattr(self, 'extract_honbun_files') else []
+            for honbun_filename, honbun_content in honbun_files[:5]:  # 처음 5개 파일만 검색
+                search_contents.append((honbun_filename, honbun_content))
+            
+            for pattern in founded_patterns:
+                for file_name, file_content in search_contents:
+                    matches = re.findall(pattern, file_content, re.IGNORECASE)
+                    if matches:
+                        logger.info(f"설립년도 패턴 매치: {pattern} → {matches[:3]} (파일: {file_name})")
+                        
+                        # 가장 오래된 년도를 설립년도로 선택
+                        valid_years = []
+                        for match in matches:
+                            year = int(match) if isinstance(match, str) else int(match[0])
+                            if 1850 <= year <= submission_year:
+                                valid_years.append(year)
+                        
+                        if valid_years:
+                            founded_year = min(valid_years)  # 가장 오래된 년도
+                            logger.info(f"honbun에서 설립년도 추출: {founded_year}년 (패턴: {pattern}, 파일: {file_name})")
+                            return founded_year
+            
+            logger.info(f"설립년도 추출 실패 - 事業年度와 헤더 모두에서 발견 안됨 (파일: {filename})")
+            return None
+            
+        except Exception as e:
+            logger.warning(f"설립년도 추출 중 오류: {e} (파일: {filename})")
+            return None
+    
+    def _extract_security_code(self, content: str, filename: str) -> Optional[str]:
+        """상장번호 추출 (証券コード)"""
+        patterns = [
+            r"証券コード[^\d]*?(\d{4})",
+            r"銘柄コード[^\d]*?(\d{4})",
+            r"コード番号[^\d]*?(\d{4})"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content)
+            if match:
+                sec_code = match.group(1)
+                logger.info(f"상장번호 추출: {sec_code} (파일: {filename})")
+                return sec_code
+        return None
+    
+    async def _translate_to_korean(self, japanese_text: str) -> str:
+        """일본어 텍스트를 한글로 번역 (Google Translate API 사용)"""
+        if not japanese_text:
+            return ""
+        
+        # 먼저 하드코딩된 매핑 테이블에서 확인 (빠른 처리)
+        translation_map = {
+            # 회사 타입
+            "株式会社": "",
+            "ホールディングス": "홀딩스",
+            "グループ": "그룹",
+            "コーポレーション": "코퍼레이션",
+            "インク": "",
+            
+            # 주요 회사명들
+            "ソフトバンク": "소프트뱅크",
+            "リクルート": "리쿠르트",
+            "サイバーエージェント": "사이버에이전트",
+            "メルカリ": "메르카리",
+            "楽天": "라쿠텐",
+            "ディー・エヌ・エー": "DeNA",
+            "ソニー": "소니",
+            "富士通": "후지쯔",
+            "エヌ・ティ・ティ・データ": "NTT데이터",
+            "ＬＩＮＥヤフー": "라인야후",
+            
+            # 기술/산업 용어들
+            "テクノロジー": "테크놀로지",
+            "システム": "시스템",
+            "ソフトウェア": "소프트웨어",
+            "デジタル": "디지털",
+            "インターネット": "인터넷",
+            "コンピューター": "컴퓨터",
+            "ネットワーク": "네트워크",
+            "サービス": "서비스",
+            "ソリューション": "솔루션",
+            "イノベーション": "이노베이션",
+            
+            # 일반적인 카타카나 단어들  
+            "マーケティング": "마케팅",
+            "コンサルティング": "컨설팅",
+            "エンタテインメント": "엔터테인먼트",
+            "プラットフォーム": "플랫폼",
+            "メディア": "미디어",
+            "ゲーム": "게임",
+            "コンテンツ": "콘텐츠"
+        }
+        
+        # 1. 매핑 테이블로 기본 번역 (빠른 처리)
+        translated = japanese_text
+        for jp, ko in sorted(translation_map.items(), key=lambda x: len(x[0]), reverse=True):
+            translated = translated.replace(jp, ko)
+        
+        # 2. 매핑 테이블로만 충분히 번역된 경우 (일본어가 거의 남지 않음)
+        # 원본과 동일하면 번역이 안된 것으로 간주하여 Google 번역 시도
+        if translated != japanese_text and not re.search(r'[ひらがなカタカナ漢字]', translated):
+            translated = re.sub(r'\s+', ' ', translated).strip()
+            logger.info(f"매핑 테이블 번역: {japanese_text} → {translated}")
+            return translated
+        
+        # 3. Google Translate API 사용 (일본어가 남아있는 경우)
+        try:
+            # Google Translate API 호출
+            google_translated = await self._call_google_translate(japanese_text)
+            if google_translated:
+                translated = google_translated 
+                logger.info(f"Google 번역: {japanese_text} → {translated}")
+            else:
+                # API 실패시 매핑 테이블 결과라도 사용
+                translated = re.sub(r'\s+', ' ', translated).strip()
+                logger.warning(f"Google 번역 실패, 매핑 테이블 사용: {japanese_text} → {translated}")
+        except Exception as e:
+            logger.error(f"번역 중 오류: {e}, 매핑 테이블 결과 사용")
+            translated = re.sub(r'\s+', ' ', translated).strip()
+        
+        return translated.strip()
+    
+    async def _call_google_translate(self, text: str) -> Optional[str]:
+        """Google Translate API 호출 (REST API 직접 사용)"""
+        try:
+            import aiohttp
+            
+            # API 키는 환경변수에서 가져오기
+            google_api_key = os.getenv("GOOGLE_TRANSLATE_API_KEY")
+            if not google_api_key:
+                logger.warning("GOOGLE_TRANSLATE_API_KEY 환경변수가 설정되지 않음")
+                return None
+            
+            # Google Translate REST API 호출
+            url = "https://translation.googleapis.com/language/translate/v2"
+            params = {
+                'key': google_api_key,
+                'q': text,
+                'source': 'ja',
+                'target': 'ko',
+                'format': 'text'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=params) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if 'data' in result and 'translations' in result['data']:
+                            translated_text = result['data']['translations'][0]['translatedText']
+                            return translated_text
+                    else:
+                        logger.error(f"Google Translate API 오류: {response.status}")
+                        return None
+            
+        except Exception as e:
+            logger.error(f"Google Translate API 호출 실패: {e}")
+            return None
+    
+    async def _get_market_cap(self, sec_code: str) -> Optional[int]:
+        """Yahoo Finance에서 시가총액 가져오기"""
+        if not sec_code or len(sec_code) != 4:
+            return None
+        
+        try:
+            import httpx
+            
+            url = f"https://finance.yahoo.co.jp/quote/{sec_code}.T"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1"
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                
+                content = response.text
+                logger.debug(f"Yahoo Finance 페이지 크기: {len(content)} 문자")
+                
+                # 시가총액 패턴 - 새로운 DOM 구조에 맞게 업데이트  
+                # 구조: <span>時価総額</span>...<dd>...<span class="StyledNumber__value__3rXW">VALUE</span>...<span>百万円</span>
+                pattern = r'時価総額.*?StyledNumber__value__[^>]*>([^<]+)</span>.*?百万円'
+                
+                match = re.search(pattern, content, re.DOTALL)
+                if match:
+                    try:
+                        value_str = match.group(1).replace(',', '').replace('.', '')
+                        if value_str:
+                            value = float(value_str) * 1_000_000  # 백만엔 → 엔
+                            
+                            # 합리적인 범위 체크 (1천억엔 ~ 1,000조엔)
+                            if 100_000_000_000 <= value <= 1_000_000_000_000_000:
+                                logger.info(f"시가총액 추출 성공: {sec_code} → {int(value):,}엔")
+                                return int(value)
+                                
+                    except (ValueError, IndexError):
+                        pass
+                
+                logger.warning(f"시가총액을 찾지 못함: {sec_code}")
+                
+        except Exception as e:
+            logger.error(f"시가총액 추출 실패 ({sec_code}): {e}")
+        
+        return None    
     def _extract_value_from_context(self, content: str, keyword: str, filename: str) -> Optional[float]:
         """키워드 주변에서 수치 추출"""
         try:
@@ -272,9 +938,6 @@ class EdinetAPI:
         
         if not candidates:
             candidates = results
-        
-        # 가장 최적 값 선택 (여러 기준 적용)
-        best_result = candidates[0]
         
         # 컨텍스트 우선순위에 따른 선택
         def get_context_priority(context_ref):
@@ -386,7 +1049,7 @@ class EdinetAPI:
                         clean_match = re.sub(r'[^0-9]', '', str(match))
                         if clean_match:
                             value = float(clean_match)
-                            if value > max_value and value > 1000:  # 1000명 이상만
+                            if value > max_value and value > 100:  # 100명 이상만
                                 max_value = value
                     except:
                         continue
@@ -463,9 +1126,9 @@ class EdinetAPI:
             return datetime.now().year  # 최신 연도
     
     def _extract_annual_salary(self, content: str, filename: str) -> Optional[float]:
-        """평균 연봉 추출 (원 단위)"""
+        """평균 연봉 추출 (엔 단위)"""
         try:
-            # 11,453,407 같은 정확한 원 단위 값 찾기
+            # 11,453,407 같은 정확한 엔 단위 값 찾기
             patterns = [
                 r"平均年間給与[^0-9]*?([0-9,]+)\s*円",  # 일본어 + 円
                 r"AverageAnnualSalary[^0-9]*?([0-9,]+)",  # 영문
@@ -478,7 +1141,7 @@ class EdinetAPI:
                     raw_value = match.group(1).replace(',', '')
                     value = float(raw_value)
                     
-                    # 만원 단위인 경우 원으로 변환
+                    # 만엔 단위인 경우 엔으로 변환
                     if "万円" in pattern:
                         value *= 10000
                     
@@ -546,18 +1209,7 @@ class EdinetAPI:
         except:
             return None
 
-def parse_edinet_basic_info(company_code: str) -> EdinetBasic:
-    """EDINET 기업 기본 정보 파싱 (현재는 코드만 저장)"""
-    basic = EdinetBasic()
-    basic.name = "リクルートホールディングス"  # 기본값
-    basic.address = "東京都千代田区丸の内1-9-1"  # 기본값
-    return basic
 
-def parse_edinet_financials(company_code: str) -> EdinetFinancials:
-    """EDINET 재무 정보 파싱 (현재는 기본값)"""
-    financials = EdinetFinancials()
-    financials.fiscalYear = datetime.now().year
-    return financials
 
 class CompanyReportUpdater:
     """기업 리포트 최신화 관리자"""
@@ -572,7 +1224,7 @@ class CompanyReportUpdater:
             "recruit": ["株式会社リクルートホールディングス"],
             "dena": ["株式会社ディー・エヌ・エー"],
             "sony": ["ソニーグループ株式会社"],
-            "softbank": ["ソフトバンクグループ株式会社"],
+            "softbank": ["ソフトバンク株式会社"],
             "fujitsu": ["富士通株式会社"],  # 본사로 변경
             "nttdata": ["株式会社ＮＴＴデータグループ"]
         }
@@ -637,7 +1289,8 @@ class CompanyReportUpdater:
                     company_name=company_name,
                     submitted_date=date,
                     doc_type="120",
-                    company_key=company_key
+                    company_key=company_key,
+                    sec_code=doc.get("secCode")[:4] if doc.get("secCode") else None  # EDINET API 응답에서 secCode 앞 4자리만 추가
                 )
                 found_reports.append(report)
                 logger.info(f"유가증권보고서 발견: {company_name} ({date}) - {doc.get('docID')}")
@@ -717,14 +1370,32 @@ class CompanyReportUpdater:
                     honbun_files = api.extract_honbun_files(zip_content)
                     
                     if honbun_files:
+                        # 인사 정보 및 기본 정보 파싱
                         employee_info = api.parse_employee_info(honbun_files)
+                        basic_info = api.parse_basic_info(honbun_files, zip_content)
                         
                         # EdinetData 객체 생성
                         edinet_data = EdinetData()
                         
                         # 기본 정보 설정
                         edinet_data.basic = EdinetBasic()
-                        edinet_data.basic.name = document.company_name
+                        edinet_data.basic.name = basic_info.get("name") or document.company_name
+                        edinet_data.basic.name_en = basic_info.get("name_en", "")
+                        edinet_data.basic.name_ko = await api._translate_to_korean(edinet_data.basic.name) if edinet_data.basic.name else ""
+                        edinet_data.basic.headquarters = basic_info.get("headquarters", "")  # 일본어 원본
+                        # 본사 주소 한글 번역
+                        edinet_data.basic.headquarters_ko = await api._translate_to_korean(edinet_data.basic.headquarters) if edinet_data.basic.headquarters else ""
+                        # 본사 주소 영문 번역 (추후 구현 가능)
+                        edinet_data.basic.headquarters_en = ""  # 현재는 빈 값
+                        # founded_year 직접 설정
+                        edinet_data.basic.founded_year = basic_info.get("founded_year")
+                        # CompanyDocument에서 secCode가 있으면 우선 사용, 없으면 문서에서 추출한 것 사용
+                        edinet_data.basic.sec_code = document.sec_code or basic_info.get("sec_code")
+                        
+                        # 시가총액 가져오기 (상장번호가 있는 경우)
+                        if edinet_data.basic.sec_code:
+                            market_cap = await api._get_market_cap(edinet_data.basic.sec_code)
+                            edinet_data.basic.market_cap = market_cap
                         edinet_data.basic.employee_count = employee_info.get("employeeCount")
                         
                         # HR 정보 설정
@@ -819,34 +1490,41 @@ async def fetch_edinet_data(company_code: str) -> EdinetData:
             honbun_files = api.extract_honbun_files(zip_content)
             
             if honbun_files:
-                # 3. 인사 정보 파싱
+                # 3. 기본 정보 파싱 (설립년도, 회사명, 본사 주소 등)
+                basic_info = api.parse_basic_info(honbun_files, zip_content)
+                
+                # 4. 인사 정보 파싱
                 employee_info = api.parse_employee_info(honbun_files)
                 
-                # 4. EdinetHR 객체에 저장
+                # 5. EdinetBasic 객체에 저장
+                edinet_data.basic.name = basic_info.get("name", "")
+                edinet_data.basic.name_en = basic_info.get("name_en", "")
+                edinet_data.basic.headquarters = basic_info.get("headquarters", "")
+                edinet_data.basic.founded_year = basic_info.get("founded_year")
+                edinet_data.basic.sec_code = basic_info.get("sec_code")
+                edinet_data.basic.employee_count = employee_info["employeeCount"]
+                
+                # 6. EdinetHR 객체에 저장
                 edinet_data.hr.avgTenureYears = employee_info["avgTenureYears"]
                 edinet_data.hr.avgAgeYears = employee_info["avgAgeYears"]
                 edinet_data.hr.avgAnnualSalaryJPY = employee_info["avgAnnualSalaryJPY"]
                 
-                # 5. 출처 정보 저장
+                # 7. 출처 정보 저장
                 edinet_data.provenance = {
                     "source": "EDINET API v2",
                     "company_code": company_code,
                     "fetched_at": datetime.now().isoformat(),
+                    "basic_info_provenance": basic_info.get("provenance", {}),
                     "employee_info_provenance": employee_info.get("provenance", {})
                 }
-                
-                # 6. 기본 정보 설정 (먼저 기본값 설정 후 직원수 덮어쓰기)
-                edinet_data.basic = parse_edinet_basic_info(company_code)
-                edinet_data.basic.employee_count = employee_info["employeeCount"]
             else:
                 logger.warning("honbun 파일을 찾을 수 없습니다.")
-                edinet_data.basic = parse_edinet_basic_info(company_code)
         else:
             logger.warning("유가증권보고서 패키지를 다운로드할 수 없습니다.")
-            edinet_data.basic = parse_edinet_basic_info(company_code)
     
     # 재무 정보 설정
-    edinet_data.financials = parse_edinet_financials(company_code)
+    edinet_data.financials = EdinetFinancials()
+    edinet_data.financials.fiscalYear = datetime.now().year
     
     return edinet_data
 
@@ -859,7 +1537,7 @@ async def test_edinet_api():
     data = await fetch_edinet_data(company_code)
     
     print(f"기업명: {data.basic.name}")
-    print(f"주소: {data.basic.address}")
+    print(f"본점: {data.basic.headquarters}")
     print(f"직원 수: {data.basic.employee_count}")
     print(f"평균 근속연수: {data.hr.avgTenureYears}")
     print(f"평균 연령: {data.hr.avgAgeYears}")

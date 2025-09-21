@@ -61,8 +61,15 @@ class IRDocument(BaseModel):
 class EdinetBasic(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: str = ""                         # 제출회사명/상호
-    address: str = ""                      # 본사 소재지(요약)
+    name_en: str = ""                      # 영문명 (英訳名)
+    name_ko: str = ""                      # 한글명 (번역)
+    headquarters: str = ""                 # 본점 소재지 (本店の所在の場所)
+    headquarters_en: str = ""              # 본점 소재지 영문 (번역)
+    headquarters_ko: str = ""              # 본점 소재지 한글 (번역)
     founded_year: Optional[int] = None     # 설립연도(숫자)
+    industry: str = ""                     # 업계
+    market_cap: Optional[int] = None       # 시가총액 (JPY)
+    sec_code: Optional[str] = None         # 상장번호
     employee_count: Optional[int] = None   # (연결 기준 권장)
 
 class EdinetHR(BaseModel):
@@ -70,39 +77,48 @@ class EdinetHR(BaseModel):
     avgTenureYears: Optional[float] = None     # 평균근속연수
     avgAgeYears: Optional[float] = None        # 평균 연령
     avgAnnualSalaryJPY: Optional[int] = None   # 평균 연봉(정수 JPY)
-    femaleRatio: Optional[float] = None        # 0~1 (있을 경우)
 
 class EdinetFinancials(BaseModel):
     model_config = ConfigDict(extra="ignore")
     revenueJPY: Optional[int] = None           # FY 매출(정규화된 숫자)
     fiscalYear: Optional[int] = None           # 해당 FY (예: 2024)
 
+class EdinetPhilosophy(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    mission: str = ""                          # 미션
+    vision: str = ""                           # 비전
+    values: List[str] = Field(default_factory=list)  # 핵심 가치
+
 class EdinetData(BaseModel):
     model_config = ConfigDict(extra="ignore")
     basic: EdinetBasic = Field(default_factory=EdinetBasic)
     hr: EdinetHR = Field(default_factory=EdinetHR)
     financials: EdinetFinancials = Field(default_factory=EdinetFinancials)
+    philosophy: EdinetPhilosophy = Field(default_factory=EdinetPhilosophy)
     # 출처 근거(문서/섹션/페이지 등)
     provenance: Dict[str, str] = Field(default_factory=dict)
 
 # -----------------------------------------------------------------------------
 # 회사 공식 홈페이지 기반 데이터(브랜딩/문화/채용/뉴스)
+# EDINET에서 제공되지 않는 추가 정보만 포함
 # -----------------------------------------------------------------------------
 class WebsiteBranding(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    logo: Optional[str] = None                 # 로고 URL
-    industry: str = ""                         # 업종(요약)
-    size: str = ""                             # 규모(대기업/중견 등)
-    location: str = ""                         # 대표 도시 (간단한 도시명만)
-    description: str = ""                      # 짧은 소개
-    website: str = ""                          # 공식 URL
+    logo: Optional[str] = None                 # 로고 URL (EDINET에서 제공 안됨)
+    size: str = ""                             # 규모(대기업/중견 등) (EDINET에서 제공 안됨)
+    description: str = ""                      # 짧은 소개 (EDINET에서 제공 안됨)
+    website: str = ""                          # 공식 URL (EDINET에서 제공 안됨)
+    # 중복 제거된 필드들:
+    # - industry: EDINET에서 제공 (EdinetBasic.industry)
+    # - location: EDINET에서 제공 (EdinetBasic.headquarters)
 
 class WebsitePhilosophy(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    description: str = ""
-    mission: str = ""
-    vision: str = ""
-    values: List[str] = Field(default_factory=list)
+    description: str = ""                      # 추가 철학 설명 (EDINET에서 제공 안됨)
+    # 중복 제거된 필드들:
+    # - mission: EDINET에서 제공 (EdinetPhilosophy.mission)
+    # - vision: EDINET에서 제공 (EdinetPhilosophy.vision)
+    # - values: EDINET에서 제공 (EdinetPhilosophy.values)
 
 class WebsiteCulture(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -112,9 +128,10 @@ class WebsiteCulture(BaseModel):
 
 class WebsiteOffice(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    address: str = ""
-    access: str = ""
-    facilities: List[str] = Field(default_factory=list)
+    access: str = ""                           # 교통편 (EDINET에서 제공 안됨)
+    facilities: List[str] = Field(default_factory=list)  # 시설 정보 (EDINET에서 제공 안됨)
+    # 중복 제거된 필드들:
+    # - address: EDINET에서 제공 (EdinetBasic.headquarters)
 
 class WebsiteJobs(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -123,11 +140,12 @@ class WebsiteJobs(BaseModel):
 
 class WebsiteNews(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    ceoMessage: Optional[str] = None
-    detailedDescription: Optional[str] = None
-    careerProgram: List[str] = Field(default_factory=list)
-    salaryBreakdown: Dict[str, str] = Field(default_factory=dict)  # junior/mid/senior/executive
-    recentNews: List[Dict[str, str]] = Field(default_factory=list) # {title,date,summary}
+    ceoMessage: Optional[str] = None           # CEO 메시지 (EDINET에서 제공 안됨)
+    detailedDescription: Optional[str] = None  # 상세 설명 (EDINET에서 제공 안됨)
+    careerProgram: List[str] = Field(default_factory=list)  # 채용 프로그램 (EDINET에서 제공 안됨)
+    recentNews: List[Dict[str, str]] = Field(default_factory=list) # 최신 뉴스 (EDINET에서 제공 안됨)
+    # 중복 제거된 필드들:
+    # - salaryBreakdown: EDINET에서 제공 (EdinetHR.avgAnnualSalaryJPY)
 
 class WebsiteData(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -151,8 +169,9 @@ class ExternalRatings(BaseModel):
 class ExternalData(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ratings: ExternalRatings = Field(default_factory=ExternalRatings)
-    salary_info: str = ""              # 텍스트 원문
-    employee_count_note: str = ""      # 외부출처 기준의 체감 인원/메모
+    # 중복 제거된 필드들:
+    # - salary_info: EDINET에서 제공 (EdinetHR.avgAnnualSalaryJPY)
+    # - employee_count_note: EDINET에서 제공 (EdinetBasic.employee_count)
 
 # -----------------------------------------------------------------------------
 # 최상위 리포트
@@ -178,37 +197,21 @@ class CompanyReport(BaseModel):
     
     # 데이터 통합 유틸리티 메서드들
     def get_company_name(self) -> str:
-        """회사명 (EDINET 우선, 없으면 Website)"""
-        if self.edinet.basic.name:
-            return self.edinet.basic.name
-        return self.website.branding.name or "정보 없음"
+        """회사명 (EDINET에서 제공)"""
+        return self.edinet.basic.name or "정보 없음"
     
     def get_company_address(self) -> str:
-        """본사 주소 (EDINET 우선, 없으면 Website)"""
-        if self.edinet.basic.address:
-            return self.edinet.basic.address
-        return self.website.branding.location or "정보 없음"
-    
-    def get_company_location(self) -> str:
-        """대표 도시 (Website에서 간단한 도시명)"""
-        return self.website.branding.location or "정보 없음"
+        """본사 주소 (EDINET에서 제공)"""
+        return self.edinet.basic.headquarters or "정보 없음"
     
     def get_founded_year(self) -> Optional[int]:
-        """설립년도 (EDINET 우선)"""
+        """설립년도 (EDINET에서 제공)"""
         return self.edinet.basic.founded_year
     
     def get_employee_count(self) -> Optional[int]:
-        """직원 수 (EDINET 우선, 없으면 External)"""
-        if self.edinet.basic.employee_count:
-            return self.edinet.basic.employee_count
-        # External에서 숫자 추출 시도
-        if self.external.employee_count_note:
-            import re
-            match = re.search(r'(\d+)', self.external.employee_count_note)
-            if match:
-                return int(match.group(1))
-        return None
+        """직원 수 (EDINET에서 제공)"""
+        return self.edinet.basic.employee_count
     
     def get_avg_salary(self) -> Optional[int]:
-        """평균 급여 (EDINET 우선)"""
+        """평균 급여 (EDINET에서 제공)"""
         return self.edinet.hr.avgAnnualSalaryJPY
