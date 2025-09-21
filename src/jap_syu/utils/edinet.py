@@ -24,6 +24,7 @@ from pathlib import Path
 from loguru import logger
 from bs4 import BeautifulSoup
 from ..models import EdinetData, EdinetBasic, EdinetHR, EdinetFinancials, IRDocument
+from .database import DatabaseManager
 
 # .env 파일 로드 (python-dotenv가 설치되어 있으면)
 try:
@@ -1419,6 +1420,18 @@ class CompanyReportUpdater:
                         
                         # 데이터 저장
                         await self.save_company_data(company_key, edinet_data)
+                        
+                        # RDS에 저장 (옵션)
+                        try:
+                            async with DatabaseManager() as db:
+                                await db.create_tables()  # 테이블이 없으면 생성
+                                db_success = await db.save_company_data(company_key, edinet_data)
+                                if db_success:
+                                    logger.info(f"💾 {company_key} RDS 저장 완료")
+                                else:
+                                    logger.warning(f"⚠️ {company_key} RDS 저장 실패")
+                        except Exception as db_error:
+                            logger.warning(f"⚠️ {company_key} RDS 저장 중 오류: {db_error}")
                         
                         logger.info(f"✅ {company_key} 업데이트 완료!")
                         return True
