@@ -1,0 +1,70 @@
+{
+  "basic": {
+    "name": "株式会社サイバーエージェント",
+    "name_en": "ＣｙｂｅｒＡｇｅｎｔ，Ｉｎｃ．",
+    "name_ko": "사이버에이전트",
+    "headquarters": "東京都渋谷区宇田川町40番１号",
+    "headquarters_en": "",
+    "headquarters_ko": "도쿄도 시부야구 우다가와초 40번 1호",
+    "founded_year": 1997,
+    "industry": "",
+    "market_cap": 889233000000,
+    "sec_code": "4751",
+    "employee_count": 7720
+  },
+  "hr": {
+    "avgTenureYears": 6.4,
+    "avgAgeYears": 33.7,
+    "avgAnnualSalaryJPY": 8822
+  },
+  "financials": {
+    "revenueJPY": null,
+    "fiscalYear": 2025
+  },
+  "philosophy": {
+    "mission": "",
+    "vision": "",
+    "values": []
+  },
+  "provenance": {
+    "source": "EDINET API v2",
+    "document_id": "S100UXZA",
+    "submitted_date": "2024-12-13",
+    "fetched_at": "2025-09-21T20:31:05.733550",
+    "company_key": "cyberagent",
+    "employee_info_provenance": {
+      "avgTenureYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05072-000_2024-09-30_01_2024-12-13_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageLengthOfServiceYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAgeYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05072-000_2024-09-30_01_2024-12-13_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAnnualSalaryJPY": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05072-000_2024-09-30_01_2024-12-13_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "JPY",
+        "scale": "3",
+        "method": "ixbrl_concept"
+      },
+      "employeeCount": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05072-000_2024-09-30_01_2024-12-13_ixbrl.htm",
+        "concept": "jpcrp_cor:NumberOfEmployees",
+        "contextRef": "CurrentYearInstant",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      }
+    }
+  }
+}

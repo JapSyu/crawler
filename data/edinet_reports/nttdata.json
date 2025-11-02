@@ -1,0 +1,70 @@
+{
+  "basic": {
+    "name": "エヌ・ティ・ティ・データ通信株式会社",
+    "name_en": "NTT DATA GROUP CORPORATION",
+    "name_ko": "NTT데이터通信",
+    "headquarters": "東京都江東区豊洲三丁目3番3号",
+    "headquarters_en": "",
+    "headquarters_ko": "도쿄도 고토구 도요스 산쵸메 3번 3호",
+    "founded_year": 1988,
+    "industry": "",
+    "market_cap": 5567925000000,
+    "sec_code": "9613",
+    "employee_count": 197777
+  },
+  "hr": {
+    "avgTenureYears": 14.1,
+    "avgAgeYears": 39.7,
+    "avgAnnualSalaryJPY": 9234
+  },
+  "financials": {
+    "revenueJPY": null,
+    "fiscalYear": 2025
+  },
+  "philosophy": {
+    "mission": "",
+    "vision": "",
+    "values": []
+  },
+  "provenance": {
+    "source": "EDINET API v2",
+    "document_id": "S100VWR9",
+    "submitted_date": "2025-06-20",
+    "fetched_at": "2025-09-21T20:30:36.171669",
+    "company_key": "nttdata",
+    "employee_info_provenance": {
+      "avgTenureYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04911-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageLengthOfServiceYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAgeYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04911-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAnnualSalaryJPY": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04911-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "JPY",
+        "scale": "3",
+        "method": "ixbrl_concept"
+      },
+      "employeeCount": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04911-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:NumberOfEmployees",
+        "contextRef": "CurrentYearInstant",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      }
+    }
+  }
+}

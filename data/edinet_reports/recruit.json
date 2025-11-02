@@ -1,0 +1,70 @@
+{
+  "basic": {
+    "name": "株式会社リクルートホールディングス",
+    "name_en": "Recruit Holdings Co., Ltd.",
+    "name_ko": "리쿠르트홀딩스",
+    "headquarters": "東京都千代田区丸の内一丁目9番2号",
+    "headquarters_en": "",
+    "headquarters_ko": "도쿄도 지요다구 마루노우치 잇쵸메 9번 2호",
+    "founded_year": 1960,
+    "industry": "",
+    "market_cap": 12401823000000,
+    "sec_code": "6098",
+    "employee_count": 49480
+  },
+  "hr": {
+    "avgTenureYears": 8.5,
+    "avgAgeYears": 40.5,
+    "avgAnnualSalaryJPY": 11453407
+  },
+  "financials": {
+    "revenueJPY": null,
+    "fiscalYear": 2025
+  },
+  "philosophy": {
+    "mission": "",
+    "vision": "",
+    "values": []
+  },
+  "provenance": {
+    "source": "EDINET API v2",
+    "document_id": "S100VZG5",
+    "submitted_date": "2025-06-23",
+    "fetched_at": "2025-09-21T20:29:59.952058",
+    "company_key": "recruit",
+    "employee_info_provenance": {
+      "avgTenureYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E07801-000_2025-03-31_01_2025-06-23_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageLengthOfServiceYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAgeYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E07801-000_2025-03-31_01_2025-06-23_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAnnualSalaryJPY": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E07801-000_2025-03-31_01_2025-06-23_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "JPY",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "employeeCount": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E07801-000_2025-03-31_01_2025-06-23_ixbrl.htm",
+        "concept": "jpcrp_cor:NumberOfEmployees",
+        "contextRef": "CurrentYearInstant",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      }
+    }
+  }
+}

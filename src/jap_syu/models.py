@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from pydantic import BaseModel, HttpUrl, Field, ConfigDict
-from typing import List, Literal, Optional, Dict
+from typing import List, Literal, Optional, Dict, Any
 from datetime import datetime, timezone
 
 # -----------------------------------------------------------------------------
@@ -96,7 +96,7 @@ class EdinetData(BaseModel):
     financials: EdinetFinancials = Field(default_factory=EdinetFinancials)
     philosophy: EdinetPhilosophy = Field(default_factory=EdinetPhilosophy)
     # 출처 근거(문서/섹션/페이지 등)
-    provenance: Dict[str, str] = Field(default_factory=dict)
+    provenance: Dict[str, Any] = Field(default_factory=dict)
 
 # -----------------------------------------------------------------------------
 # 회사 공식 홈페이지 기반 데이터(브랜딩/문화/채용/뉴스)

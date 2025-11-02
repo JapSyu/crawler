@@ -1,0 +1,70 @@
+{
+  "basic": {
+    "name": "富士通株式会社",
+    "name_en": "Fujitsu Limited",
+    "name_ko": "후지쯔",
+    "headquarters": "東京都中央区日本橋兜町2番1号",
+    "headquarters_en": "",
+    "headquarters_ko": "도쿄도 주오구 니혼바시 토우쵸 2번 1호",
+    "founded_year": 1901,
+    "industry": "",
+    "market_cap": 7590612000000,
+    "sec_code": "6702",
+    "employee_count": 112743
+  },
+  "hr": {
+    "avgTenureYears": 18.2,
+    "avgAgeYears": 43.1,
+    "avgAnnualSalaryJPY": 9291084
+  },
+  "financials": {
+    "revenueJPY": null,
+    "fiscalYear": 2025
+  },
+  "philosophy": {
+    "mission": "",
+    "vision": "",
+    "values": []
+  },
+  "provenance": {
+    "source": "EDINET API v2",
+    "document_id": "S100W1DS",
+    "submitted_date": "2025-06-20",
+    "fetched_at": "2025-09-21T20:30:19.037002",
+    "company_key": "fujitsu",
+    "employee_info_provenance": {
+      "avgTenureYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E01766-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageLengthOfServiceYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAgeYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E01766-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAnnualSalaryJPY": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E01766-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "JPY",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "employeeCount": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E01766-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:NumberOfEmployees",
+        "contextRef": "CurrentYearInstant",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      }
+    }
+  }
+}

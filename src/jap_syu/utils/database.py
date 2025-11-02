@@ -67,13 +67,13 @@ class DatabaseManager:
             logger.info("데이터베이스 연결 풀 종료")
     
     async def create_tables(self):
-        """테이블 생성"""
+        """테이블 생성 (Java 엔티티와 호환되도록 최적화)"""
         async with self.pool.acquire() as conn:
             try:
                 # 회사 기본 정보 테이블
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS companies (
-                        id SERIAL PRIMARY KEY,
+                        id BIGSERIAL PRIMARY KEY,
                         company_key VARCHAR(50) UNIQUE NOT NULL,
                         name VARCHAR(255) NOT NULL,
                         name_en VARCHAR(255),
@@ -86,6 +86,9 @@ class DatabaseManager:
                         market_cap BIGINT,
                         sec_code VARCHAR(10),
                         employee_count INTEGER,
+                        logo_url TEXT,
+                        logo_source VARCHAR(50),
+                        logo_fetched_at TIMESTAMP,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -94,11 +97,11 @@ class DatabaseManager:
                 # 인사 정보 테이블
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS company_hr (
-                        id SERIAL PRIMARY KEY,
-                        company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
-                        avg_tenure_years DECIMAL(5,2),
-                        avg_age_years DECIMAL(5,2),
-                        avg_annual_salary_jpy INTEGER,
+                        id BIGSERIAL PRIMARY KEY,
+                        company_id BIGINT REFERENCES companies(id) ON DELETE CASCADE,
+                        avg_tenure_years DOUBLE PRECISION,
+                        avg_age_years DOUBLE PRECISION,
+                        avg_annual_salary_jpy BIGINT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -107,8 +110,8 @@ class DatabaseManager:
                 # 재무 정보 테이블
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS company_financials (
-                        id SERIAL PRIMARY KEY,
-                        company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+                        id BIGSERIAL PRIMARY KEY,
+                        company_id BIGINT REFERENCES companies(id) ON DELETE CASCADE,
                         revenue BIGINT,
                         operating_income BIGINT,
                         net_income BIGINT,
@@ -120,8 +123,8 @@ class DatabaseManager:
                 # 출처 정보 테이블
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS company_provenance (
-                        id SERIAL PRIMARY KEY,
-                        company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+                        id BIGSERIAL PRIMARY KEY,
+                        company_id BIGINT REFERENCES companies(id) ON DELETE CASCADE,
                         document_id VARCHAR(100),
                         submission_date DATE,
                         extraction_method VARCHAR(100),
@@ -129,11 +132,43 @@ class DatabaseManager:
                     )
                 """)
                 
+                # 기존 테이블에 로고 컬럼 추가 (마이그레이션)
+                await self._migrate_logo_columns(conn)
+
                 logger.info("테이블 생성 완료")
-                
+
             except Exception as e:
                 logger.error(f"테이블 생성 실패: {e}")
                 raise
+
+    async def _migrate_logo_columns(self, conn):
+        """기존 companies 테이블에 로고 관련 컬럼 추가"""
+        try:
+            # 로고 관련 컬럼들이 이미 존재하는지 확인
+            check_columns = await conn.fetch("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'companies'
+                AND column_name IN ('logo_url', 'logo_source', 'logo_fetched_at')
+            """)
+
+            existing_columns = {row['column_name'] for row in check_columns}
+
+            # 없는 컬럼들만 추가
+            if 'logo_url' not in existing_columns:
+                await conn.execute("ALTER TABLE companies ADD COLUMN logo_url TEXT")
+                logger.info("companies 테이블에 logo_url 컬럼 추가")
+
+            if 'logo_source' not in existing_columns:
+                await conn.execute("ALTER TABLE companies ADD COLUMN logo_source VARCHAR(50)")
+                logger.info("companies 테이블에 logo_source 컬럼 추가")
+
+            if 'logo_fetched_at' not in existing_columns:
+                await conn.execute("ALTER TABLE companies ADD COLUMN logo_fetched_at TIMESTAMP")
+                logger.info("companies 테이블에 logo_fetched_at 컬럼 추가")
+
+        except Exception as e:
+            logger.warning(f"로고 컬럼 마이그레이션 중 오류 (무시 가능): {e}")
     
     async def save_company_data(self, company_key: str, edinet_data: EdinetData) -> bool:
         """

@@ -1,0 +1,70 @@
+{
+  "basic": {
+    "name": "ソフトバンク株式会社",
+    "name_en": "SoftBank Corp.",
+    "name_ko": "소프트뱅크",
+    "headquarters": "東京都港区海岸一丁目７番１号",
+    "headquarters_en": "",
+    "headquarters_ko": "도쿄도 미나토구 해안 잇쵸메 7번 1호",
+    "founded_year": 1986,
+    "industry": "",
+    "market_cap": 10948756000000,
+    "sec_code": "9434",
+    "employee_count": 55070
+  },
+  "hr": {
+    "avgTenureYears": 14.5,
+    "avgAgeYears": 41.7,
+    "avgAnnualSalaryJPY": 8491
+  },
+  "financials": {
+    "revenueJPY": null,
+    "fiscalYear": 2025
+  },
+  "philosophy": {
+    "mission": "",
+    "vision": "",
+    "values": []
+  },
+  "provenance": {
+    "source": "EDINET API v2",
+    "document_id": "S100W3P2",
+    "submitted_date": "2025-06-25",
+    "fetched_at": "2025-09-21T20:29:49.279718",
+    "company_key": "softbank",
+    "employee_info_provenance": {
+      "avgTenureYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04426-000_2025-03-31_01_2025-06-25_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageLengthOfServiceYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAgeYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04426-000_2025-03-31_01_2025-06-25_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAnnualSalaryJPY": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04426-000_2025-03-31_01_2025-06-25_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "JPY",
+        "scale": "3",
+        "method": "ixbrl_concept"
+      },
+      "employeeCount": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E04426-000_2025-03-31_01_2025-06-25_ixbrl.htm",
+        "concept": "jpcrp_cor:NumberOfEmployees",
+        "contextRef": "CurrentYearInstant",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      }
+    }
+  }
+}

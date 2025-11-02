@@ -1,0 +1,70 @@
+{
+  "basic": {
+    "name": "株式会社ディー・エヌ・エー",
+    "name_en": "DeNA Co., Ltd.",
+    "name_ko": "DeNA",
+    "headquarters": "東京都渋谷区渋谷二丁目24番12号",
+    "headquarters_en": "",
+    "headquarters_ko": "도쿄도 시부야구 시부야 니쵸메 24번 12호",
+    "founded_year": 1998,
+    "industry": "",
+    "market_cap": 284111000000,
+    "sec_code": "2432",
+    "employee_count": 2572
+  },
+  "hr": {
+    "avgTenureYears": 6.0,
+    "avgAgeYears": 37.9,
+    "avgAnnualSalaryJPY": 8829
+  },
+  "financials": {
+    "revenueJPY": null,
+    "fiscalYear": 2025
+  },
+  "philosophy": {
+    "mission": "",
+    "vision": "",
+    "values": []
+  },
+  "provenance": {
+    "source": "EDINET API v2",
+    "document_id": "S100VZE0",
+    "submitted_date": "2025-06-20",
+    "fetched_at": "2025-09-21T20:30:09.448017",
+    "company_key": "dena",
+    "employee_info_provenance": {
+      "avgTenureYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05460-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageLengthOfServiceYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAgeYears": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05460-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      },
+      "avgAnnualSalaryJPY": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05460-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees",
+        "contextRef": "CurrentYearInstant_NonConsolidatedMember",
+        "unitRef": "JPY",
+        "scale": "3",
+        "method": "ixbrl_concept"
+      },
+      "employeeCount": {
+        "file": "XBRL/PublicDoc/0101010_honbun_jpcrp030000-asr-001_E05460-000_2025-03-31_01_2025-06-20_ixbrl.htm",
+        "concept": "jpcrp_cor:NumberOfEmployees",
+        "contextRef": "CurrentYearInstant",
+        "unitRef": "pure",
+        "scale": "0",
+        "method": "ixbrl_concept"
+      }
+    }
+  }
+}
