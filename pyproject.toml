@@ -19,7 +19,9 @@ dependencies = [
   "loguru",
   "tenacity",
   "python-dotenv",
-  "tqdm"
+  "tqdm",
+  "motor",
+  "deepl"
 ]
 
 [tool.setuptools]
